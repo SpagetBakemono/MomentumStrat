@@ -64,4 +64,7 @@ stock_dict = ts.fetch_data("Saved")
 prices = ts.find_monthends("Close")
 momentums = ts.momentum_return()
 
+print(prices.tail(5))
+print(momentums.tail(5))
+
 plots.sample_ticker_returns_plot("ACC", momentums)
