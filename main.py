@@ -12,6 +12,7 @@ import pandas as pd
 import os
 import h5py
 import numpy as np
+from scipy.stats import kstest
 
 class stocks():
     
@@ -47,7 +48,33 @@ class stocks():
         self.momentums = np.log(self.prices.shift(1)/self.prices.shift(12))
         return self.momentums
     
-
+    def top_decile(self, top_n):
+        top_returns = self.momentums.copy()
+        i = 0
+        for col in top_returns.columns:
+            top_returns[col].values[:] = 0
+        for date,tickers in self.momentums.iterrows():
+            top_performers = tickers.nlargest(top_n).index.values
+            for x in top_performers:
+                top_returns[x].iloc[i] = 1
+            i = i+1
+        return top_returns
+    
+    def compute_prtfolio_returns(self, one_hot, n_stocks):
+        self.momentum["P_ret"] = (self.momentums*one_hot).sum(axis=1)/n_stocks
+        return self.momentum["P_ret"]
+    
+class stats_tests():
+    
+    def ks_test(self, x):
+        mean = x.mean()
+        std = x.std(ddof=0)
+        kstat, pvalue = kstest(x.values, "norm", args=(mean,std),
+                               alternative="two-sided", mode='approx')
+        print("ks statistic = ", kstat)
+        print("p value = ", pvalue)
+        
+            
 index100Path = "Data/Univ/Index_NIFTY 100.xlsx"
 index50Path = "Data/Univ/Index_NIFTY 50.xlsx"
 index50nPath = "Data/Univ/Index_NIFTY NEXT 50.xlsx"
@@ -60,11 +87,17 @@ tickers = sd.make_dataframe()
 """
 
 ts = stocks()
+st = stats_tests()
 stock_dict = ts.fetch_data("Saved")
 prices = ts.find_monthends("Close")
 momentums = ts.momentum_return()
 
-print(prices.tail(5))
-print(momentums.tail(5))
+#one hot encoded portfolio 1=part of top decile
+top_returns = ts.top_decile(10)
+#portfolio returns
+portfolio_returns = ts.compute_prtfolio_returns(top_returns, 10)[12:]
 
-plots.sample_ticker_returns_plot("ACC", momentums)
+plots.portfolio_returns_plot(portfolio_returns)
+
+#Performing KS test on portfolio returns
+st.ks_test(portfolio_returns)
