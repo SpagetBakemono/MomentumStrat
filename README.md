@@ -7,7 +7,7 @@ Available at SSRN: https://ssrn.com/abstract=3510433 or http://dx.doi.org/10.213
 
 NIFTY100 stock data taken from https://www.kaggle.com/kmldas/nse-top-100-stocks
 
-Returns generated from taking long positions rebalanced monthl (based on closing prices, equally weighted) distrubution and time series:
+Returns generated from taking long positions rebalanced monthly (based on closing prices, equally weighted) distrubution and time series:
 
 <img src="https://github.com/SpagetBakemono/MomentumStrat/blob/main/Plots/momentumReturns.png" width="400" height="300">
 
