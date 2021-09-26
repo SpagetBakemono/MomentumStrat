@@ -30,3 +30,7 @@ def portfolio_returns_plot(returns):
     axs[1].set_xlabel("Returns")
     axs[1].set_ylabel("Frequency")
     print(returns.describe())
+    
+def topn_ts_plot(df):
+    sns.set_style("darkgrid")
+    sns.lineplot(data = df)

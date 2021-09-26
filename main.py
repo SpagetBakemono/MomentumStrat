@@ -67,7 +67,6 @@ class prices(stocksData):
         
     #create one dataframe for all stock and return it
     #take pricetype as argument to filter by price type
-    #ALso use this to get open prices for next trading day
     def create_prices_df(self, priceType):
         flag = True
         for ticker in self.stocks:
@@ -85,6 +84,7 @@ class prices(stocksData):
             else:
                 pricesDf = pd.concat([pricesDf, df], join="outer", axis=1)
             self.pricesDf = pricesDf
+        print(pricesDf.head(30))
         return pricesDf
 
 #a function to sort the tickers for each timestamp by descending value
@@ -221,8 +221,12 @@ s, t = sd.fetch_data("Saved")
 cp = prices(sd)
 op = prices(sd)
 
+print("Generate dataframe of all daily close prices")
 closePricesDf = cp.create_prices_df("Close")
+closePricesDf.to_csv("Generated/closeprices.csv")
+print("Generate dataframe of all daily open prices")
 openPricesDf = op.create_prices_df("Open")
+openPricesDf.to_csv("Generated/openprices.csv")
 
 iim = iim_factors("Data/Univ/FFreturns.csv")
 iim.get_factors()
@@ -237,6 +241,9 @@ closePriceMomentum = cpMomentum.momentum_return(12,1)
 overnight_returns = cpMomentum.overnight_returns(openPricesDf)
 
 top_performers, top_tickers = cpMomentum.top_n_percentile_returns(10)
+
+avg_top_performer = top_performers.mean(axis=1)
+plots.topn_ts_plot(avg_top_performer)
 
 iim_portfolio = execute(top_tickers, openPricesDf, closePricesDf)
 iim_portfolio.rebalance_portfolio()
