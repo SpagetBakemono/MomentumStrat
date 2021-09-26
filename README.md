@@ -7,7 +7,7 @@ Available at SSRN: https://ssrn.com/abstract=3510433 or http://dx.doi.org/10.213
 
 NIFTY100 stock data taken from https://www.kaggle.com/kmldas/nse-top-100-stocks
 
-Average momentum of top performers from 2011 to 2019:
+Average momentum of top performers from 2011:
 
 <img src="https://github.com/SpagetBakemono/MomentumStrat/blob/main/Plots/momentumReturns.png" width="600" height="300">
 
