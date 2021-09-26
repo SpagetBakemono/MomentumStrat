@@ -160,9 +160,15 @@ class execute(object):
     #reindex to match timestamps for division
     #then switch to month end index
     def rebalance_portfolio(self, period=1, holding=1):
+        print("month end closing prices:", self.closedf, sep="\n")
+        print("month start opening prices:", self.opendf, sep="\n")
         reindex_close = self.closedf.copy()
-        reindex_close = reindex_close.set_index(self.opendf.index).shift(holding-1)
+        #since holding period on paper is one month, no need to shift
+        reindex_close = reindex_close.set_index(self.opendf.index).shift(1-holding)
         realized_return = np.log(reindex_close/self.opendf).set_index(self.closedf.index)
+        #plotting average return
+        print("realized monthly return:", realized_return, sep="\n")
+        plots.portfolio_returns_plot(realized_return.mean(axis=1))
         #because portfolio is implemented in the next period shift
         top_tickers_ = top_tickers.shift(period).dropna()
         timestamp_returns = defaultdict()
@@ -171,6 +177,7 @@ class execute(object):
             tickers = row.values
             timestamp_returns[timestamp] = realized_return.loc[timestamp][tickers].sum()
         timestamp_returns = pd.Series(timestamp_returns)
+        print("iim portfolio returns", timestamp_returns, "\n")
         plots.portfolio_returns_plot(timestamp_returns)
     
 class stats_tests:
@@ -241,9 +248,6 @@ closePriceMomentum = cpMomentum.momentum_return(12,1)
 overnight_returns = cpMomentum.overnight_returns(openPricesDf)
 
 top_performers, top_tickers = cpMomentum.top_n_percentile_returns(10)
-
-avg_top_performer = top_performers.mean(axis=1)
-plots.topn_ts_plot(avg_top_performer)
 
 iim_portfolio = execute(top_tickers, openPricesDf, closePricesDf)
 iim_portfolio.rebalance_portfolio()
