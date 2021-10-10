@@ -1,95 +1,94 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Sep 22 14:18:36 2021
+Created on Thu Oct  7 22:10:34 2021
 
 @author: Aditya
 """
 
-from saveData import save_data
-from pandas.tseries.offsets import MonthEnd
-import datetime as dt
-import plots
 import pandas as pd
-import os
-import h5py
+import yfinance as yf
 import numpy as np
-from scipy.stats import kstest
-import statsmodels.api as sm
 from collections import defaultdict
+import seaborn as sns
 
-class iim_factors(object):
-    """
-    get factors from IIMA dataset
-    """
-    
-    def __init__(self, factor_location):
-        self.iimfactors = pd.DataFrame()
-        self.file = factor_location
-        
-    def get_factors(self):
-        df = pd.read_csv(self.file)
-        df["Month"] = pd.to_datetime(df["Month"], format='%Y%m')
-        df.set_index('Month', inplace=True)
-        self.iimfactors = df        
-    
-class stocksData(object):
-    """
-    class for fetching individual ticker data from HDF5 files
-    Generates a dictionary of [ticker]->daily returns
-    Combines individual stock data in the dictionary to one single dataframe
-    stocksDF = timestamp -> price (open/close etc as per argument priceType)
-    """
-    
-    #initialize member variables
-    def __init__(self):
-        self.stocks = {}
-        self.tickers = []
-    
-    #fetch data from h5 files in /Saved   
-    def fetch_data(self, filepath):
-        for file in os.listdir(filepath):
-            filedir = filepath+"/"+file
-            f = h5py.File(filedir, 'r')
-            key = list(f.keys())[0]
-            self.stocks[key] = pd.read_hdf(path_or_buf=filedir, key=key, mode='r')
-        self.tickers = list(self.stocks.keys())
-        return self.stocks, self.tickers
 
-class prices(stocksData):
+################   Helper functions  ######################################
+def get_yahoo_finance_data(start_date, end_date, weights_data):
     """
-    child class of stocksData that will contain prices of various kinds
+    Functions to save yahoo finance data as csv
+    Store all stock data in one dictionary in the form of "ticker_param"
+    Save this as df (stock_universe) and stocks data.csv
     """
-    
-    def __init__(self, sd):
-        self.stocks = sd.stocks.copy()
-        self.tickers = sd.tickers.copy()
-        self.pricesDf = pd.DataFrame()
-        
-    #create one dataframe for all stock and return it
-    #take pricetype as argument to filter by price type
-    def create_prices_df(self, priceType):
-        flag = True
-        for ticker in self.stocks:
-            df = self.stocks[ticker].copy()
-            df.set_index('Date', inplace=True)
-            df = df[priceType]
-            df = df[~df.index.duplicated()]
-            #rename the series name to ticker name to preserve order later
-            df.name = ticker
-            #set first dataframe as first pd series
-            if(flag):
-                pricesDf = df
-                flag = False
-            #concat remaining series
-            else:
-                pricesDf = pd.concat([pricesDf, df], join="outer", axis=1)
-            self.pricesDf = pricesDf
-        print(pricesDf.head(30))
-        return pricesDf
+    tickers = weights_data.columns.values[1:]
+    temp = pd.DataFrame()
+    for ticker in tickers:
+        stock_universe = pd.DataFrame()
+        search = ticker + ".NS"
+        print(ticker)
+        ticker_df = yf.download(search, start_date, end_date)
+        if(not ticker_df.empty):
+            stock_universe[ticker+"_Date"] = ticker_df.index.values
+            stock_universe[ticker+"_Open"] = ticker_df["Open"].values
+            stock_universe[ticker+"_High"] = ticker_df["High"].values
+            stock_universe[ticker+"_Low"] = ticker_df["Close"].values
+            stock_universe[ticker+"_Adj_close"] = ticker_df["Adj Close"].values
+            stock_universe[ticker+"_Volume"] = ticker_df["Volume"].values
+            temp = pd.concat([stock_universe, temp], axis=1)
+            temp.to_csv("stocks data.csv")
+    return temp
 
-#a function to sort the tickers for each timestamp by descending value
-#then return a dictionary of n bins of tickers in order
+def get_local_data(path):
+    """
+    fetch local data
+    """
+    return pd.read_csv(path, low_memory=False)
+
+def get_ticker_data(universe_data, ticker):
+    """
+    given a universe of stocks and a particular ticker
+    get the ohlc table by stripping off ticker name from columns
+    """
+    Date = ticker+"_Date"
+    Open = ticker+"_Open"
+    High = ticker+"_High"
+    Low = ticker+"_Low"
+    AdjClose = ticker+"_Adj_close"
+    Volume = ticker+"_Volume"
+    stock_data = pd.DataFrame()
+    if(Date in universe_data.columns.values):
+        stock_data["Date"] = pd.to_datetime(universe_data[Date])
+        stock_data["Open"] = universe_data[Open]
+        stock_data["High"] = universe_data[High]
+        stock_data["Low"] = universe_data[Low]
+        stock_data["AdjClose"] = universe_data[AdjClose]
+        stock_data["Volume"] = universe_data[Volume]
+        stock_data = stock_data.set_index("Date")
+    else:
+        """
+        in case of empty data due to failed download, 
+        return an empty ohlc table
+        """
+        return pd.DataFrame()
+    return(stock_data)
+
+def dict_stock_OHLC_tables(weights_data, universe_stocks):
+    """
+    Funtion to get dictionary of all available OHLC Tables
+    Use weights data to get ticker name and search in local file
+    """
+    tickers = weights_data.columns.values[1:]
+    dict_all_tables = {}
+    for ticker in tickers:
+        ticker_ohlc_table = get_ticker_data(universe_data, ticker)
+        dict_all_tables[ticker] = ticker_ohlc_table
+        if(dict_all_tables[ticker].empty):
+            del dict_all_tables[ticker]
+    return dict_all_tables
+
 def sort_by_col(df, n):
+    """
+    Get sets of top performers in 0-n, n-2n, ... kn-100
+    """
     sorted_dict = defaultdict(list)
     for date,tickers in df.iterrows():
         ticker_by_desc_order = tickers.sort_values(ascending=False)
@@ -97,157 +96,189 @@ def sort_by_col(df, n):
             sorted_dict[tickers.name].append(ticker_by_desc_order[i:i+n])
     return sorted_dict
 
-class momentum(prices):
-    """
-    class for getting momentum of various kinds
-    inherits pricesDf from stocksData class for analysis
-    """
-    
-    #initialize member variables from stocksData
-    def __init__(self, p):
-        self.pricesDf = p.pricesDf
-        self.momentums = pd.DataFrame()
+################   End of Helper functions  ###############################
 
-    #resample the data given frequency
-    def resample_returns(self, method="last", freq="M"):
-        if(method=="last"):
-            self.pricesDf = self.pricesDf.groupby(pd.Grouper(freq=freq)).tail(1)
-        if(method=="first"):
-            self.pricesDf = self.pricesDf.groupby(pd.Grouper(freq=freq)).head(1)
-        if(method=="mean"):
-            self.pricesDf = self.pricesDf.resample(freq).mean()
-        return self.pricesDf
-            
-    #return log returns based on open/close/etc, method of mean/end, number of periods and a skip period
-    def momentum_return(self, period=12, skip=1):
-        #compute momentum from returns
-        self.momentums = np.log(self.pricesDf.shift(skip)/self.pricesDf.shift(period))
-        return self.momentums
+class PriceReturns(object):
+    """
+    class for price and returns given a dictionary of all ohlc tables
+    """
+    def __init__(self, dict_all_tables):
+        self.dict_all_tables = dict_all_tables
     
-    #compute return using 2 dataframes. eg, overnight returns between close and open
-    def overnight_returns(self, df2):
-        shiftedPrices = self.pricesDf.shift(1).copy()
-        shiftedPrices = shiftedPrices.set_index(df2.index)
-        return np.log(df2/shiftedPrices)
-      
-    #get the n bins of prices and chose the first bin (topn) for each time stamp
-    #create a data frame with top n returns for each timestamp
-    def top_n_percentile_returns(self, top_n):
-        top_n_df = pd.DataFrame()
+
+    def get_stock_ohlc_table(self, ticker):
+        """
+        get ohlc table from dictionary
+        """
+        return self.dict_all_tables[ticker]
+    
+
+    def get_stock_price(self, ohlc_table, price_type):
+        """
+        get price from ohlc table
+        """
+        return ohlc_table[price_type]
+    
+
+    def resample_prices(self, price, freq, method):
+        """
+        resample the price
+        """
+        if(method=="start"):
+            return price.resample(freq, convention=method).first()
+        if(method=="end"):
+            return price.resample(freq).last()
+    
+
+    def generate_prices(self, price_type, freq, method):
+        """
+        return a dataframe of ticker->price
+        """
+        dict_universe_price_table = {}
+        stock_price_df = pd.DataFrame()
+        for ticker in self.dict_all_tables.keys():
+            ohlc_table = self.get_stock_ohlc_table(ticker)
+            price = self.get_stock_price(ohlc_table, price_type)
+            resampled_price = self.resample_prices(price, freq, method)
+            dict_universe_price_table[ticker] = resampled_price
+            dict_universe_price_table[ticker] = dict_universe_price_table[
+                    ticker].rename(ticker)
+        stock_price_df = pd.concat(dict_universe_price_table.values(), axis=1)
+        return stock_price_df
+        
+
+    def calculate_stock_daily_returns(self, ticker, price_type):
+        """
+        given ticker, pricetype, get daily return for that ticker using pricetype
+        """
+        ohlc_table = self.get_stock_ohlc_table(ticker)
+        price = self.get_stock_price(ohlc_table, price_type)
+        return (price - price.shift(1))/price
+    
+    
+    def calculate_stock_freq_return(self, ticker, price_type, freq="M"):
+        """
+        given ticker, pricetype, calculate frequency based return for that ticker
+        Sum along axis=0 gives total return for frequency
+        """
+        daily_stock_return = self.calculate_stock_daily_returns(ticker, price_type)
+        return daily_stock_return.resample(freq).sum()
+    
+
+    def generate_returns(self, price_type, freq):
+        """
+        generate returns for all tickers in universe and return it as a dictionary
+        """
+        dict_universe_returns_tables = {}
+        for ticker in self.dict_all_tables.keys():
+            dict_universe_returns_tables[ticker] = self.calculate_stock_freq_return(
+                    ticker, price_type, "M")
+            dict_universe_returns_tables[ticker] = dict_universe_returns_tables[
+                    ticker].rename(ticker)
+        return dict_universe_returns_tables
+    
+    
+    def generate_returns_dataframe(self, returns):
+        """
+        convert dict to dataframe
+        """
+        return pd.concat(returns.values(), axis=1)
+
+class Momentum(object):
+    
+    def __init__(self, dict_all_tables):
+        self.price_momentum_dataframe = pd.DataFrame()
+        self.dict_universe_price_momentums = {}
+        self.dict_all_tables = dict_all_tables
+    
+    
+    def calculate_stock_price_momentum(self, stock_prices, period=12, skip=1):
+        """
+        given returns and period, calculate price Momentum 
+        """
+        return np.log(stock_prices.shift(skip)/stock_prices.shift(period))
+    
+
+    def get_stock_ohlc_table(self, ticker):
+        """
+        given ticker, get ohlc table
+        """
+        return self.dict_all_tables[ticker]
+    
+    def resample_prices(self, price, freq):
+        """
+        resample based on frequency
+        """
+        return price.resample("M").last()
+        
+
+    def generate_universe_price_momentum(self, price_type, freq="M", period=12, skip=1):
+        """
+        get universe price momentum
+        """
+        for ticker in self.dict_all_tables.keys():
+            ohlc_table = self.get_stock_ohlc_table(ticker)
+            price = ohlc_table[price_type]
+            resampled_price = self.resample_prices(price, freq)
+            price_momentum = self.calculate_stock_price_momentum(
+                    resampled_price, period=12, skip=1)
+            self.dict_universe_price_momentums[ticker] = price_momentum
+            self.dict_universe_price_momentums[ticker] = self.dict_universe_price_momentums[
+                    ticker].rename(ticker)
+        return self.dict_universe_price_momentums
+    
+    #create a dataframe from the price momentum dictionary
+    def create_price_momentum_dataframe(self):
+        self.price_momentum_dataframe = pd.concat(
+                self.dict_universe_price_momentums.values(), axis=1)
+        self.price_momentum_dataframe.replace([np.inf, -np.inf], np.nan, inplace=True)
+        return self.price_momentum_dataframe
+    
+    def top_n_percentile_price_momentum(self, n):
+        sorted_dict = sort_by_col(self.price_momentum_dataframe, n)
+        top_n_price_momentum = pd.DataFrame()
         top_n_tickers = pd.DataFrame()
-        sorted_dict = sort_by_col(self.momentums,top_n)
         for timestamp in sorted_dict:
-            top_n_df[timestamp] = sorted_dict[timestamp][0].values
+            top_n_price_momentum[timestamp] = sorted_dict[timestamp][0].values
             top_n_tickers[timestamp] = sorted_dict[timestamp][0].index
-        #top_n_df has the returns of n winning stocks desc order
-        #also return winning return preserving order
-        top_n_df = (top_n_df.T).dropna()
-        top_n_tickers = top_n_tickers[top_n_df.index].T
-        return top_n_df, top_n_tickers
+        top_n_price_momentum = (top_n_price_momentum.T).dropna()
+        top_n_tickers = top_n_tickers[top_n_price_momentum.index].T
+        return top_n_price_momentum, top_n_tickers
 
-class execute(object):
-    """
-    Given a list of tickers to long or short, exexute portfolio created
-    Get returns using open and close prices after holding period
-    """
-    def __init__(self, tickerList, opendf, closedf):
-        self.tickerList = tickerList
-        self.opendf = opendf
-        self.closedf = closedf
-        
-    #using the momentum returns at t-period, execute portfolio at t
-    #held for holding period
-    #reindex to match timestamps for division
-    #then switch to month end index
-    def rebalance_portfolio(self, period=1, holding=1):
-        print("month end closing prices:", self.closedf, sep="\n")
-        print("month start opening prices:", self.opendf, sep="\n")
-        reindex_close = self.closedf.copy()
-        #since holding period on paper is one month, no need to shift
-        reindex_close = reindex_close.set_index(self.opendf.index).shift(1-holding)
-        realized_return = np.log(reindex_close/self.opendf).set_index(self.closedf.index)
-        #plotting average return
-        print("realized monthly return:", realized_return, sep="\n")
-        plots.portfolio_returns_plot(realized_return.mean(axis=1))
-        #because portfolio is implemented in the next period shift
-        top_tickers_ = top_tickers.shift(period).dropna()
-        timestamp_returns = defaultdict()
-        for i,row in top_tickers_.iterrows():
-            timestamp = row.name
-            tickers = row.values
-            timestamp_returns[timestamp] = realized_return.loc[timestamp][tickers].sum()
-        timestamp_returns = pd.Series(timestamp_returns)
-        print("iim portfolio returns", timestamp_returns, "\n")
-        plots.portfolio_returns_plot(timestamp_returns)
-    
-class stats_tests:
-    
-    #Perform KS test wrt normal distribution
-    def ks_test(self, x):
-        mean = x.mean()
-        std = x.std(ddof=0)
-        kstat, pvalue = kstest(x.values, "norm", args=(mean,std),
-                               alternative="two-sided", mode='approx')
-        print("ks statistic = ", kstat)
-        print("p value = ", pvalue)
-        
-class Model(object):
-    """
-    Parent class for all models
-    Variables are factors (X) and portfolio returns (Y)
-    """
-    def __init__(self, factors, returns):
-        self.factors = factors
-        self.returns = returns
 
-    #since factors and returns can be measured at different frequencies etc
-    #resample_factors will match the timestamps and return a singl dataframe
-    #of X and Y for each timestamp
+def rebalance_portfolio(top_tickers, returns, period=1, holding=1):
+    #shift top tickers by period
+    top_tickers = top_tickers.shift(1).dropna()
+    #define a timestamp return dictionary
+    timestamp_returns = {}
+    #iterate thru top tickers
+    for i, row in top_tickers.iterrows():
+        timestamp = row.name
+        tickers = row.values
+        timestamp_returns[timestamp] = returns.loc[timestamp][tickers].mean()
+    return pd.Series(timestamp_returns) 
 
-class iim_factor_analysis(iim_factors):
-    """
-    class to implement the method provided in the paper
-    inherits iim factor dataframe
-    """
-    
-    def __init__(self, iim, returns):
-        self.factors = iim.iim_factors
-        self.returns = returns
-    
-    #since factors and returns are at different frequencies
-    #matching them with iim factors timestamps
+def calculate_annualized_return(returns):
+    expected_return = returns.mean()
+    annualized_return = (np.power(1+expected_return, 12)-1)*100
+    print(annualized_return,"%")
 
-index100Path = "Data/Univ/Index_NIFTY 100.xlsx"
-index50Path = "Data/Univ/Index_NIFTY 50.xlsx"
-index50nPath = "Data/Univ/Index_NIFTY NEXT 50.xlsx"
-stockPath = "Data"
+#get data from yahoo finance
+path = "stocks data.csv"
+weights_data = pd.read_csv("Data/Univ/Nifty_100_Constituent_Weightage.csv")
+universe_data = get_local_data(path)
+dict_all_tables = dict_stock_OHLC_tables(weights_data, universe_data)
 
-sd = stocksData()
-s, t = sd.fetch_data("Saved")
+pr = PriceReturns(dict_all_tables)
+returns = pr.generate_returns("AdjClose", "M")
+returns = pr.generate_returns_dataframe(returns)
 
-cp = prices(sd)
-op = prices(sd)
+m = Momentum(dict_all_tables)
+dict_price_momentum = m.generate_universe_price_momentum("AdjClose")
+df = m.create_price_momentum_dataframe()
+top = m.top_n_percentile_price_momentum(10)
 
-print("Generate dataframe of all daily close prices")
-closePricesDf = cp.create_prices_df("Close")
-closePricesDf.to_csv("Generated/closeprices.csv")
-print("Generate dataframe of all daily open prices")
-openPricesDf = op.create_prices_df("Open")
-openPricesDf.to_csv("Generated/openprices.csv")
+month_start_open_prices = pr.generate_prices("Open", "MS", "start")
+month_end_close_prices = pr.generate_prices("AdjClose", "M", "end")
 
-iim = iim_factors("Data/Univ/FFreturns.csv")
-iim.get_factors()
-
-opMomentum = momentum(op)
-cpMomentum = momentum(cp)
-
-openPricesDf = opMomentum.resample_returns("first","M")
-closePricesDf = cpMomentum.resample_returns("last","M")
-
-closePriceMomentum = cpMomentum.momentum_return(12,1)
-overnight_returns = cpMomentum.overnight_returns(openPricesDf)
-
-top_performers, top_tickers = cpMomentum.top_n_percentile_returns(10)
-
-iim_portfolio = execute(top_tickers, openPricesDf, closePricesDf)
-iim_portfolio.rebalance_portfolio()
+tr = rebalance_portfolio(top[1], returns)
