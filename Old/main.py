@@ -306,4 +306,4 @@ top_n_df, top_tickers = closem.top_n_percentile_returns(10)
 p = execute(top_tickers, resampleclosestart, resampleclose)
 rr, tr = p.rebalance_portfolio()
 
-p.calculate_prices(tr)
+
